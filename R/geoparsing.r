@@ -83,15 +83,14 @@ geo_tags <- function(txt, min_freq=NA, top_n=NA, batchsize=10000, with_model=F) 
 
 #' Match geo code
 #'
-#' The DTMs created with \code{\link{prepare_gtd}} and \code{\link{prepare_news}} have a "geo" document variable.
-#' The match_geo function uses this information to match documents based on their geo code. This can be a single code (e.g., "en")
-#' or multiple codes concatenated with a comma (e.g., "en,de").
+#' If the DTMs used in the compare_documents function contained docvars with geo codes,
+#' it can be used to match documents based on their geo code. This can be a single code (e.g., "en")
+#' or multiple codes concatenated with a comma (e.g., "en,de") or another seperator defined in the 'sep' argument.
+#' A match is TRUE if at least one of the codes in the from document is the same as at least one of the codes in the to document.
 #'
 #' The function returns a logical vector indicating if each match in the edge list has a geo match.
 #'
 #' @param g             An edgelist, as created with newsflow.compare
-#' @param from_dtm      The DTM (quanteda dfm) for the articles in the `from` column in g
-#' @param to_dtm        The DTM (quanteda dfm) for the articles in the `to` column in g
 #' @param from_var      The name of the geo code column in from_dtm
 #' @param to_var        The name of the geo code column in to_dtm
 #'
@@ -99,18 +98,19 @@ geo_tags <- function(txt, min_freq=NA, top_n=NA, batchsize=10000, with_model=F) 
 #' @export
 #'
 #' @examples
-match_geo <- function(g, from_dtm, to_dtm, from_var='geo', to_var='geo') {
-  x = quanteda::docvars(from_dtm, 'geo')[match(g$from, quanteda::docnames(from_dtm))]
-  y = quanteda::docvars(to_dtm, 'geo')[match(g$to, quanteda::docnames(to_dtm))]
-  geo_lookup(x, y)
+match_geo <- function(g, from_var='geo', to_var='geo', sep=',') {
+  from_i = g$from_meta[list(g$d$from),on='document_id',which=T]
+  to_i = g$to_meta[list(g$d$to),on='document_id',which=T]
+  geo_lookup(g$from_meta[[from_var]][from_i],
+             g$to_meta[[to_var]][to_i])
 }
 
 
-geo_lookup <- function(x, y) {
+geo_lookup <- function(x, y, sep=',') {
   n = length(x)
 
-  x = data.table::tstrsplit(x, split=',')
-  y = data.table::tstrsplit(y, split=',')
+  x = data.table::tstrsplit(x, split=sep)
+  y = data.table::tstrsplit(y, split=sep)
 
   eq = rep(F, n)
   for (i in seq_along(x)) {

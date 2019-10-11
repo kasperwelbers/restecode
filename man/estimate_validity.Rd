@@ -2,14 +2,21 @@
 % Please edit documentation in R/est_validity.r
 \name{estimate_validity}
 \alias{estimate_validity}
-\title{Estimate good weight threshold by estimating precision and recall}
+\title{Estimate weight threshold by estimating precision and recall}
 \usage{
-estimate_validity(g, do_plot = T)
+estimate_validity(g, min_weight = NA, do_plot = T,
+  from_sample = NULL, n_sample = NA)
 }
 \arguments{
 \item{g}{The edgelist output of newsflow.compare (use the argument: return_as = "edgelist").}
 
+\item{min_weight}{Optionally, set a minimum weight only for this calculation}
+
 \item{do_plot}{IF set to FALSE, do not plot results (results are also returned as a data.frame)}
+
+\item{n_sample}{Draw a random sample of events. Overrides from_subset}
+
+\item{from_subset}{Optionally, a logical vector of the same length as nrow(g$from_meta) to look only as specific cases}
 }
 \value{
 A plot of the estimation, and the data.frame with estimates can be assigned
@@ -37,7 +44,8 @@ See details for more information on how the estimation works.
 We define a true positive as a match between a news document and event document where the news document indeed covers the event.
 Accordingly, without actually looking at the news coverage, we can be sure that if the news document was published before the actual occurence of the event,
 it is a false positive. We can use this information to get an estimate of the precision, recall and F1 scores. While the exact values of theses scores
-will not be accurate, they can be used to see whether it is a good idea to increase or decrease the similarity weight threshold.
+will not be accurate, they can be used to see if certain differences in preparing or comparing the data (in particular, using different weight thresholds)
+improves the results.
 
 To calculate these estimates we make the assumption that the probability of false positives in the matches for a given event
 is the same before and after the event. We can then calculate the probability of false positives as the number of matches

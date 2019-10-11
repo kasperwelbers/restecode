@@ -154,6 +154,7 @@ download_guardian <- function(query_terms, api.key, fromdate, todate, path=getwd
   files = files[!grepl('readme\\.txt$', files)]
   files = lapply(files, readRDS)
   d = data.table::rbindlist(files, fill = T)
+  data.table::setnames(d, old='webUrl', new='url')
   d$headline = as.character(d$headline)
   d$byline = as.character(d$byline)
   d$body = as.character(d$body)
@@ -167,6 +168,7 @@ download_guardian <- function(query_terms, api.key, fromdate, todate, path=getwd
 #' Prepare the GTD data
 #'
 #' Creates a document term matrix in the \code{\link[quanteda]{dfm}} class.
+#' Includes only the meta data used for the analysis presented in the vignette.
 #'
 #' @param d         A data.frame with the GTD data. You can download the GTD data for free
 #'                  by filling out \href{https://www.start.umd.edu/gtd/contact/}{this form}.
@@ -182,7 +184,7 @@ download_guardian <- function(query_terms, api.key, fromdate, todate, path=getwd
 #' gtd_data = openxlsx::read.xlsx('GTD FILE AS DOWNLOADED FROM GTD WEBSITE')
 #' gtd_dtm = prepare_gtd(gtd_data, fromdate='2010-01-01')
 #' }
-prepare_gtd <- function(d, fromdate=NULL, todate=NULL, cols = 'summary|^city|country_txt|attacktype[0-9]\\_txt|targtype[0-9]\\_txt|targsubtype[0-9]\\_txt|natlty[0-9]\\_txt|gname[0-9]|gsubname[0-9]|weaptype[0-9]\\_txt|weapdetail|victims', with_geo=T) {
+prepare_gtd <- function(d, fromdate=NULL, todate=NULL, with_geo=T) {
   d$imonth[d$imonth == 0] = 1
   d$iday[d$iday == 0] = 1
   d$date = strptime(paste(d$iyear, d$imonth, d$iday), '%Y %m %d')
@@ -198,6 +200,7 @@ prepare_gtd <- function(d, fromdate=NULL, todate=NULL, cols = 'summary|^city|cou
   ####### prepare Document Term Matrix
   ## gtd has several text fields denoted with _txt and several text fields without _txt
   ## here we select the fields, and concatenate related fields and numbered fields (gname, gname1, gname2, etc.)
+  cols = 'summary|^city|country_txt|attacktype[0-9]\\_txt|targtype[0-9]\\_txt|targsubtype[0-9]\\_txt|natlty[0-9]\\_txt|gname[0-9]|gsubname[0-9]|weaptype[0-9]\\_txt|weapdetail|victims'
   cols = grep(cols, colnames(d), value=T)
 
   ds = d[,cols,drop=F]
@@ -208,11 +211,20 @@ prepare_gtd <- function(d, fromdate=NULL, todate=NULL, cols = 'summary|^city|cou
   text = do.call(paste, args=as.list(ds))
 
   d = data.frame(id = d$eventid, date = d$date,
-                 text = text, summary = d$summary,
+                 text = text,
                  url = paste0('https://www.start.umd.edu/gtd/search/IncidentSummary.aspx?gtdid=', as.character(d$eventid)),
                  geo = geo_tags(paste(d$country_txt, d$city), top_n = 1),
                  country = d$country_txt,
                  city = d$city,
+                 lat = d$latitude,
+                 lon = d$longitude,
+                 success = d$success,
+                 suicide = d$suicide,
+                 type = d$attacktype1_txt,
+                 target = d$targtype1_txt,
+                 weapon = d$weaptype1_txt,
+                 killed = d$nkill,
+                 wounded = d$nwound,
                  stringsAsFactors = F)
   d = d[!is.na(d$id),]
   prepare_dtm(d)

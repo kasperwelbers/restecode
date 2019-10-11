@@ -4,19 +4,19 @@
 \alias{gtd_pr}
 \title{Plot Precision and Recall scores}
 \usage{
-gtd_pr(g, hourdiff_range = c(0, 7 * 24), weight_range = c(1, 30),
-  steps = 30, weights = NULL)
+gtd_pr(g, weight_range = c(1, 30), steps = 30, weights = NULL,
+  filter = NULL)
 }
 \arguments{
 \item{g}{An edgelist, as created with newsflow.compare}
-
-\item{hourdiff_range}{Filter on hour difference}
 
 \item{weight_range}{The range of weight to plot on the x axis}
 
 \item{steps}{The number of ticks on the x axis}
 
 \item{weights}{Optionally, provide a vector of weights. This overrides the weight_range and steps arguments}
+
+\item{filter}{Optionally, a logical vector indicating which rows of g$d to use.}
 }
 \value{
 A plot an a list with data.frames

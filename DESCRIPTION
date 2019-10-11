@@ -18,6 +18,9 @@ Imports:
     Matrix,
     data.table,
     GuardianR
+Suggests:
+    knitr,
+    kableExtra
 License: GPL-3
 Encoding: UTF-8
 LazyData: true

@@ -1,4 +1,4 @@
-#' Estimate good weight threshold by estimating precision and recall
+#' Estimate weight threshold by estimating precision and recall
 #'
 #' This function estimates a weight threshold for an RNewsflow document comparison network that serves as an "event matching" task.
 #' The "from" documents in the edgelist need to be events, or other types of documents of which you can be sure that the date of the "to" documents cannot precede them.
@@ -18,13 +18,17 @@
 #' See details for more information on how the estimation works.
 #'
 #' @param g         The edgelist output of newsflow.compare (use the argument: return_as = "edgelist").
+#' @param min_weight Optionally, set a minimum weight only for this calculation
 #' @param do_plot   IF set to FALSE, do not plot results (results are also returned as a data.frame)
+#' @param from_subset Optionally, a logical vector of the same length as nrow(g$from_meta) to look only as specific cases
+#' @param n_sample  Draw a random sample of events. Overrides from_subset
 #'
 #' @details
 #' We define a true positive as a match between a news document and event document where the news document indeed covers the event.
 #' Accordingly, without actually looking at the news coverage, we can be sure that if the news document was published before the actual occurence of the event,
 #' it is a false positive. We can use this information to get an estimate of the precision, recall and F1 scores. While the exact values of theses scores
-#' will not be accurate, they can be used to see whether it is a good idea to increase or decrease the similarity weight threshold.
+#' will not be accurate, they can be used to see if certain differences in preparing or comparing the data (in particular, using different weight thresholds)
+#' improves the results.
 #'
 #' To calculate these estimates we make the assumption that the probability of false positives in the matches for a given event
 #' is the same before and after the event. We can then calculate the probability of false positives as the number of matches
@@ -40,22 +44,36 @@
 #'
 #' @return A plot of the estimation, and the data.frame with estimates can be assigned
 #' @export
-estimate_validity <- function(g, do_plot=T) {
-  meta = attr(g, 'from_meta')
-  before_n = sum(meta$lag_n, na.rm=T)
-  after_n = sum(meta$from_n - meta$lag_n, na.rm=T)
+estimate_validity <- function(g, min_weight=NA, do_plot=T, from_sample=NULL, n_sample=NA) {
+  if (!is.na(n_sample)) {
+    from_sample = rep(F, nrow(g$from_meta))
+    if (n_sample > length(from_sample)) stop('n_sample must be smaller than number of events')
+    from_sample[sample(1:length(from_sample), size = n_sample)] = T
+  }
+  if (!is.null(from_sample)) {
+    g$from_meta = subset(g$from_meta, from_sample)
+    g$d = subset(g$d, from %in% g$from_meta$document_id)
+  }
 
-  thresholds = seq(min(g$weight), 50, length.out=99)
-  res = data.frame(threshold=thresholds, N_after=NA, FP_prob=NA)
+  before_n = sum(g$from_meta$lag_n, na.rm=T)
+  after_n = sum(g$from_meta$from_n - g$from_meta$lag_n, na.rm=T)
 
-  before_event = g$hourdiff < 0
+  thresholds = seq(min(g$d$weight), 50, length.out=99)
+  if (!is.na(min_weight)) thresholds = thresholds[thresholds > min_weight]
+  res = data.frame(threshold=thresholds, N_after=NA, M_after=NA, FP_prob=NA)
+
+  before_event = g$d$hourdiff < 0
   for (i in 1:length(thresholds)) {
-    above_thres = g$weight >= thresholds[i]
+    above_thres = g$d$weight >= thresholds[i]
     if (sum(above_thres) == 0) break
 
     res$N_after[i] = after_n
     res$M_after[i] = sum(above_thres & !before_event)
     res$FP_prob[i] = sum(above_thres & before_event) / before_n
+
+    ## or use upper conf int (but takes long to compute)
+    #bt = binom.test(sum(above_thres & before_event), before_n)
+    #res$FP_prob[i] = bt$conf.int[2]
   }
   res = res[!is.na(res$FP_prob) &! res$N_after == 0,]
 
@@ -82,9 +100,97 @@ estimate_validity <- function(g, do_plot=T) {
     graphics::text(x=res$threshold[top], y=95, labels=paste(' weight =',round(res$threshold[top],2)), adj=0, font=3, cex=0.9, family='mono')
     graphics::legend('right', legend = c(expression(hat("P")), expression(hat("R")), expression(hat("F1"))), bty='n', lty=c(1,2,1), col=c('black','black','darkgrey'), lwd=2)
 
-    hist(g$hourdiff[g$weight >= res$threshold[top]], xlab='Hour difference', main='Matches per hour', right=F)
+    hist(g$d$hourdiff[g$d$weight >= res$threshold[top]], xlab='Hour difference', main='Matches per hour', right=F)
   }
 
   invisible(res)
 }
 
+moving_weight <- function(g, min_ratio=2, min_weight=NA, report_pr=T) {
+  d = data.table::data.table(from=g$d$from,
+                 to=g$d$to,
+                 weight=g$d$weight,
+                 orig_i=1:nrow(g$d))
+  d[, before := as.numeric(g$d$hourdiff < 0)]
+  d[, after := as.numeric(g$d$hourdiff >= 0)]
+  d[, before_all := as.numeric(g$d$hourdiff < 0)]
+  d[, after_all := as.numeric(g$d$hourdiff >= 0)]
+
+  ## sort on -weight to calculate total number of matches for each weight value
+  data.table::setorderv(d, cols = c('weight'), order = c(-1))
+  d[,before_all := cumsum(before)]
+  d[,after_all := cumsum(after)]
+  d[,before := cumsum(before), by='from']
+  d[,after := cumsum(after), by='from']
+
+  ## prepare margin scores and index
+  m =data.table::data.table(from=g$from_meta$document_id,
+                 before_n = g$from_meta$lag_n,
+                 after_n = g$from_meta$from_n - g$from_meta$lag_n)
+  mi = m[list(d$from), on = 'from', which=T]
+
+  ## calculate odds ratio
+  #odds_before = (d$before / (m$before_n[mi] - d$before))
+  #odds_after = (d$after / (m$after_n[mi] - d$after))
+  #d[, odds_ratio := odds_after / odds_before]
+  ## note that it is impossible that both before_n and after_n are zero
+  ## so the outcome is never NaN (only 0 or Inf)
+
+  ## alternative, use all matches for any event with this weight to calculate probability of false positive
+  ## but use after current event for actual matches
+  odds_before = (d$before_all + 0.5 / (sum(m$before_n, na.rm = T) - d$before_all + 0.5))
+  odds_after = (d$after + 0.5 / (m$after_n[mi] - d$after + 0.5))
+  d[, odds_ratio := odds_after / odds_before]
+
+  ## probablity of fp is postives that occured before event,
+  ## plus positives that occured after event times fp probability
+  ## divided by n
+  d$fp_before = d$before_all
+  d$total_before = sum(m$before_n, na.rm=T)
+  d$total_after = sum(m$after_n, na.rm=T)
+  d$false_rate_before = d$fp_before / d$total_before
+  d$fp_after = d$false_rate_before * d$total_after
+  d$tp = d$after_all - d$fp_after
+  d$p = d$tp / 1:nrow(d)
+  d$prob = 1 - ((1-d$p)^d$after)
+
+  ## we'll also add the cumsum of the n_before
+
+  ## now sort on +weight, so that we can find the first match for from
+  ## of which the odds_ratio > min_ratio
+  data.table::setorderv(d, 'orig_i')
+  return(d$p)
+
+  data.table::setorderv(d, cols = c('from','weight'))
+  ## find where threshold should stop
+  d[, stop_threshold := odds_ratio > min_ratio]
+  if (!is.na(min_weight)) d[weight < min_weight, stop_threshold := F]
+  ## use cumsum > 0 so that all weights after stop are also TRUE
+  ever_since <- function(x) cumsum(x) > 0
+  d[, stop_threshold := ever_since(stop_threshold), by='from']
+
+  d
+
+
+  rbeta(10, 10,1000000)
+
+  ## return logical vector in original order
+  data.table::setorderv(d, 'orig_i')
+
+  mean(d$odds_ratio > 680 & d$weight < 11)
+  mean(d$odds_ratio < 680 & d$weight >= 11)
+
+  d[d$odds_ratio > 680,]
+
+  d
+
+  sum(d$odds_ratio == Inf)
+  sum(d$odds_ratio >= 2)
+
+
+  pr = calculate_gtd_pr(g$d[d$stop_threshold & g$d$hourdiff >= 0,])
+  message(sprintf('Matches:\nPrecision: %s\nRecall:  %s\nF1:    %s', pr$Pm, pr$Rm, pr$F1m))
+  message(sprintf('\n\nArticles:\nPrecision: %s\nRecall:  %s\nF1:    %s', pr$Pa, pr$Ra, pr$F1a))
+
+  d$stop_threshold
+}

@@ -4,9 +4,7 @@
 \alias{prepare_gtd}
 \title{Prepare the GTD data}
 \usage{
-prepare_gtd(d, fromdate = NULL, todate = NULL,
-  cols = "summary|^city|country_txt|attacktype[0-9]\\\\_txt|targtype[0-9]\\\\_txt|targsubtype[0-9]\\\\_txt|natlty[0-9]\\\\_txt|gname[0-9]|gsubname[0-9]|weaptype[0-9]\\\\_txt|weapdetail|victims",
-  with_geo = T)
+prepare_gtd(d, fromdate = NULL, todate = NULL, with_geo = T)
 }
 \arguments{
 \item{d}{A data.frame with the GTD data. You can download the GTD data for free
@@ -22,6 +20,7 @@ A quanteda style DTM
 }
 \description{
 Creates a document term matrix in the \code{\link[quanteda]{dfm}} class.
+Includes only the meta data used for the analysis presented in the vignette.
 }
 \examples{
 \donttest{

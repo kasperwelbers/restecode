@@ -4,14 +4,10 @@
 \alias{match_geo}
 \title{Match geo code}
 \usage{
-match_geo(g, from_dtm, to_dtm, from_var = "geo", to_var = "geo")
+match_geo(g, from_var = "geo", to_var = "geo", sep = ",")
 }
 \arguments{
 \item{g}{An edgelist, as created with newsflow.compare}
-
-\item{from_dtm}{The DTM (quanteda dfm) for the articles in the `from` column in g}
-
-\item{to_dtm}{The DTM (quanteda dfm) for the articles in the `to` column in g}
 
 \item{from_var}{The name of the geo code column in from_dtm}
 
@@ -21,9 +17,10 @@ match_geo(g, from_dtm, to_dtm, from_var = "geo", to_var = "geo")
 A logical vector
 }
 \description{
-The DTMs created with \code{\link{prepare_gtd}} and \code{\link{prepare_news}} have a "geo" document variable.
-The match_geo function uses this information to match documents based on their geo code. This can be a single code (e.g., "en")
-or multiple codes concatenated with a comma (e.g., "en,de").
+If the DTMs used in the compare_documents function contained docvars with geo codes,
+it can be used to match documents based on their geo code. This can be a single code (e.g., "en")
+or multiple codes concatenated with a comma (e.g., "en,de") or another seperator defined in the 'sep' argument.
+A match is TRUE if at least one of the codes in the from document is the same as at least one of the codes in the to document.
 }
 \details{
 The function returns a logical vector indicating if each match in the edge list has a geo match.

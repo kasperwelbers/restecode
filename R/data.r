@@ -29,3 +29,14 @@
 #' head(gold_matches$articles)
 #' head(gold_matches$matches)
 "gold_matches"
+
+#' GTD matching results
+#'
+#' This is the result of the compare_documents function as used in the vignette.
+#'
+#' @docType data
+#' @usage data(terrorism_terms)
+#' @format An RNewsflow_edgelist object, which is a list with an edgelist (i.e. GTD -> news article pairs) and document meta data.
+#' @examples
+#' gtd_comparison_results
+"gtd_comparison_results"
