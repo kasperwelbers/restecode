@@ -16,6 +16,7 @@ Imports:
     geosphere,
     RANN,
     rworldmap,
+    mapproj,
     ggplot2,
     stringi,
     newsmap,
