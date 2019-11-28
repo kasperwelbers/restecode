@@ -4,7 +4,7 @@
 \alias{gtd_pr}
 \title{Plot Precision and Recall scores}
 \usage{
-gtd_pr(g, weight_range = c(1, 30), steps = 30, weights = NULL,
+gtd_pr(g, weight_range, steps, weights = NULL, weight_col = "weight",
   filter = NULL)
 }
 \arguments{
@@ -15,6 +15,8 @@ gtd_pr(g, weight_range = c(1, 30), steps = 30, weights = NULL,
 \item{steps}{The number of ticks on the x axis}
 
 \item{weights}{Optionally, provide a vector of weights. This overrides the weight_range and steps arguments}
+
+\item{weight_col}{the name of the column with the weight scores}
 
 \item{filter}{Optionally, a logical vector indicating which rows of g$d to use.}
 }

@@ -12,13 +12,14 @@
 #' @param weight_range    The range of weight to plot on the x axis
 #' @param steps           The number of ticks on the x axis
 #' @param weights         Optionally, provide a vector of weights. This overrides the weight_range and steps arguments
+#' @param weight_col the name of the column with the weight scores
 #' @param filter          Optionally, a logical vector indicating which rows of g$d to use.
 #'
 #' @return A plot an a list with data.frames
 #' @export
 #'
 #' @examples
-gtd_pr <- function(g, weight_range=c(1,30), steps=30, weights=NULL, filter=NULL) {
+gtd_pr <- function(g, weight_range, steps, weights=NULL, weight_col='weight', filter=NULL) {
   ## filter d on time and hourdiff beforehand for quicker computation
   hourdiff_range=c(0,7*24)
   d = g$d
@@ -33,7 +34,7 @@ gtd_pr <- function(g, weight_range=c(1,30), steps=30, weights=NULL, filter=NULL)
     weights = seq(minw, maxw, length.out = steps)
   }
 
-  res = data.table::rbindlist(sapply(weights, function(w) calculate_gtd_pr(d, w), simplify = F))
+  res = data.table::rbindlist(sapply(weights, function(w) calculate_gtd_pr(d, w, weight_col), simplify = F))
 
   m <- matrix(c(1,2,3,3), nrow = 2,ncol = 2,byrow = TRUE)
   minx = min(c(res$Pa, res$Pm))
@@ -84,18 +85,18 @@ gtd_pr <- function(g, weight_range=c(1,30), steps=30, weights=NULL, filter=NULL)
 #'
 #' @return A list with P, R and F1 scores for both the match and article level.
 #' @export
-calculate_gtd_pr <- function(e, min_weight=NA, hourdiff_range=c(0,7*24)) {
+calculate_gtd_pr <- function(e, min_weight=NA, weight_col='weight', hourdiff_range=c(0,7*24)) {
   a = gold_matches$articles
   m = gold_matches$matches
   m$real = T
   e = e[e$to %in% a$guardian_id,]
-  if (!is.na(min_weight)) e = e[e$weight >= min_weight,]
+  if (!is.na(min_weight)) e = e[e[[weight_col]] >= min_weight,]
 
   e = e[e$hourdiff >= hourdiff_range[1] & e$hourdiff < hourdiff_range[2],]
 
   e = merge(e,m, by.x=c('from','to'), by.y=c('gtd_id','guardian_id'), all=T)
   e$real[is.na(e$real)] = F
-  e$hit = !is.na(e$weight)
+  e$hit = !is.na(e[[weight_col]])
   e$hit_f = factor(e$hit, levels=c(F,T))
   e$real_f = factor(e$real, levels=c(F,T))
 

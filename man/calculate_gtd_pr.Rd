@@ -4,7 +4,8 @@
 \alias{calculate_gtd_pr}
 \title{Calculate precision, recall and F1 score for an edgelist}
 \usage{
-calculate_gtd_pr(e, min_weight = NA, hourdiff_range = c(0, 7 * 24))
+calculate_gtd_pr(e, min_weight = NA, weight_col = "weight",
+  hourdiff_range = c(0, 7 * 24))
 }
 \arguments{
 \item{e}{An edgelist in which the from column contains GTD event ids, and the to column contains

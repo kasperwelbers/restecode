@@ -5,7 +5,7 @@
 \title{Prepare news data}
 \usage{
 prepare_news(d, doc_col, date_col, text_cols, docvars = NULL,
-  first_n_words = NA, with_geo = T)
+  first_n_words = NA, with_geo = T, rm_time = T)
 }
 \arguments{
 \item{d}{A data.frame in which each row is a news article.}
@@ -19,6 +19,10 @@ prepare_news(d, doc_col, date_col, text_cols, docvars = NULL,
 \item{docvars}{The columns to include as docvars (article meta such as headline, url)}
 
 \item{first_n_words}{Optionally, only include the first n words of the article text in the DTM}
+
+\item{with_geo}{IF TRUE, add geo tags to docvars (see vignette for usage)}
+
+\item{rm_time}{If TRUE, remove time related terms, such as monday, januari and yesterday.}
 }
 \value{
 A quanteda style DTM

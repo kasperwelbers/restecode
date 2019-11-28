@@ -15,7 +15,7 @@ geo_dfm <- function(txt, ids, with_model=F) {
 
   if (with_model) label_toks = newsmap_model(toks, label_toks)
 
-  dfm(label_toks)
+  quanteda::dfm(label_toks)
 }
 
 newsmap_model <- function(toks, label_toks) {

@@ -18,9 +18,12 @@
 #' See details for more information on how the estimation works.
 #'
 #' @param g         The edgelist output of newsflow.compare (use the argument: return_as = "edgelist").
+#' @param weight_range   A vector of length 2, with the min and max weight threshold
+#' @param steps   The number of observations for which to calculate the weight threshold
 #' @param min_weight Optionally, set a minimum weight only for this calculation
 #' @param do_plot   IF set to FALSE, do not plot results (results are also returned as a data.frame)
 #' @param from_subset Optionally, a logical vector of the same length as nrow(g$from_meta) to look only as specific cases
+#' @param weight_col the name of the column with the weight scores
 #' @param n_sample  Draw a random sample of events. Overrides from_subset
 #'
 #' @details
@@ -44,7 +47,7 @@
 #'
 #' @return A plot of the estimation, and the data.frame with estimates can be assigned
 #' @export
-estimate_validity <- function(g, min_weight=NA, do_plot=T, from_sample=NULL, n_sample=NA) {
+estimate_validity <- function(g, weight_range, steps, min_weight=NA, do_plot=T, from_sample=NULL, weight_col='weight', n_sample=NA) {
   if (!is.na(n_sample)) {
     from_sample = rep(F, nrow(g$from_meta))
     if (n_sample > length(from_sample)) stop('n_sample must be smaller than number of events')
@@ -58,13 +61,13 @@ estimate_validity <- function(g, min_weight=NA, do_plot=T, from_sample=NULL, n_s
   before_n = sum(g$from_meta$lag_n, na.rm=T)
   after_n = sum(g$from_meta$from_n - g$from_meta$lag_n, na.rm=T)
 
-  thresholds = seq(min(g$d$weight), 50, length.out=99)
+  thresholds = seq(from=weight_range[1], to = weight_range[2], length.out=steps)
   if (!is.na(min_weight)) thresholds = thresholds[thresholds > min_weight]
   res = data.frame(threshold=thresholds, N_after=NA, M_after=NA, FP_prob=NA)
 
   before_event = g$d$hourdiff < 0
   for (i in 1:length(thresholds)) {
-    above_thres = g$d$weight >= thresholds[i]
+    above_thres = g$d[[weight_col]] >= thresholds[i]
     if (sum(above_thres) == 0) break
 
     res$N_after[i] = after_n
@@ -100,7 +103,8 @@ estimate_validity <- function(g, min_weight=NA, do_plot=T, from_sample=NULL, n_s
     graphics::text(x=res$threshold[top], y=95, labels=paste(' weight =',round(res$threshold[top],2)), adj=0, font=3, cex=0.9, family='mono')
     graphics::legend('right', legend = c(expression(hat("P")), expression(hat("R")), expression(hat("F1"))), bty='n', lty=c(1,2,1), col=c('black','black','darkgrey'), lwd=2)
 
-    hist(g$d$hourdiff[g$d$weight >= res$threshold[top]], xlab='Hour difference', main='Matches per hour', right=F)
+    g$d$daydiff = floor(g$d$hourdiff / 24)
+    hist(g$d$daydiff[g$d[[weight_col]] >= res$threshold[top]], xlab='Day difference', main='Matches over time', right=F, breaks=20)
   }
 
   invisible(res)
@@ -120,14 +124,25 @@ moving_weight <- function(g, min_ratio=2, min_weight=NA, report_pr=T) {
   data.table::setorderv(d, cols = c('weight'), order = c(-1))
   d[,before_all := cumsum(before)]
   d[,after_all := cumsum(after)]
+
+  d = merge(d, subset(g$from_meta, select=c('document_id','country')),
+                      by.x='from', by.y='document_id')
+
+  d[,before_c := cumsum(before), by='country']
+  d[,after_c := cumsum(after), by='country']
   d[,before := cumsum(before), by='from']
   d[,after := cumsum(after), by='from']
 
   ## prepare margin scores and index
-  m =data.table::data.table(from=g$from_meta$document_id,
-                 before_n = g$from_meta$lag_n,
-                 after_n = g$from_meta$from_n - g$from_meta$lag_n)
+  m = data.table::data.table(from=g$from_meta$document_id,
+                             country = g$from_meta$country,
+                             before_n = g$from_meta$lag_n,
+                             after_n = g$from_meta$from_n - g$from_meta$lag_n)
   mi = m[list(d$from), on = 'from', which=T]
+
+  country = m[, list(before_n = sum(before_n, na.rm=T),
+                     after_n = sum(after_n, na.rm=T)), by='country']
+  countryi = country[list(d$country), on='country', which=T]
 
   ## calculate odds ratio
   #odds_before = (d$before / (m$before_n[mi] - d$before))
@@ -136,61 +151,119 @@ moving_weight <- function(g, min_ratio=2, min_weight=NA, report_pr=T) {
   ## note that it is impossible that both before_n and after_n are zero
   ## so the outcome is never NaN (only 0 or Inf)
 
-  ## alternative, use all matches for any event with this weight to calculate probability of false positive
-  ## but use after current event for actual matches
-  odds_before = (d$before_all + 0.5 / (sum(m$before_n, na.rm = T) - d$before_all + 0.5))
-  odds_after = (d$after + 0.5 / (m$after_n[mi] - d$after + 0.5))
-  d[, odds_ratio := odds_after / odds_before]
+  ## pr total
+  total_pr = calc_PR(n_before = sum(m$before_n, na.rm=T),
+               n_after = sum(m$after_n, na.rm=T),
+               m_before = d$before_all,
+               m_after = d$after_all)
 
-  ## probablity of fp is postives that occured before event,
-  ## plus positives that occured after event times fp probability
-  ## divided by n
-  d$fp_before = d$before_all
-  d$total_before = sum(m$before_n, na.rm=T)
-  d$total_after = sum(m$after_n, na.rm=T)
-  d$false_rate_before = d$fp_before / d$total_before
-  d$fp_after = d$false_rate_before * d$total_after
-  d$tp = d$after_all - d$fp_after
-  d$p = d$tp / 1:nrow(d)
-  d$prob = 1 - ((1-d$p)^d$after)
-
-  ## we'll also add the cumsum of the n_before
-
-  ## now sort on +weight, so that we can find the first match for from
-  ## of which the odds_ratio > min_ratio
-  data.table::setorderv(d, 'orig_i')
-  return(d$p)
-
-  data.table::setorderv(d, cols = c('from','weight'))
-  ## find where threshold should stop
-  d[, stop_threshold := odds_ratio > min_ratio]
-  if (!is.na(min_weight)) d[weight < min_weight, stop_threshold := F]
-  ## use cumsum > 0 so that all weights after stop are also TRUE
-  ever_since <- function(x) cumsum(x) > 0
-  d[, stop_threshold := ever_since(stop_threshold), by='from']
-
-  d
+  #d$fp_before = d$before_all
+  #d$total_before = sum(m$before_n, na.rm=T)
+  #d$total_after = sum(m$after_n, na.rm=T)
+  #d$false_rate_before = d$fp_before / d$total_before
+  #d$fp_after = d$false_rate_before * d$total_after
+  #d$TP = d$after_all - d$fp_after
+  #d$P = d$TP / d$after_all
+  #d$R = ifelse(d$TP < 0, NA, d$TP / max(d$TP, na.rm = T))
+  #d$F1 = (2 * d$P * d$R) / (d$P + d$R)
 
 
-  rbeta(10, 10,1000000)
+  ## pr country
+  country_pr = calc_PR(n_before = country$before_n[countryi],
+               n_after = country$after_n[countryi],
+               m_before = d$before_c,
+               m_after = d$after_c)
 
-  ## return logical vector in original order
-  data.table::setorderv(d, 'orig_i')
-
-  mean(d$odds_ratio > 680 & d$weight < 11)
-  mean(d$odds_ratio < 680 & d$weight >= 11)
-
-  d[d$odds_ratio > 680,]
-
-  d
-
-  sum(d$odds_ratio == Inf)
-  sum(d$odds_ratio >= 2)
+  #d$c_before_prob = ((d$before_c + 0.1) / (country$before_n[countryi] + country$before_n[countryi]*0.1))
+  #d$c_after_prob = ((d$after_c + 0.1) / (country$after_n[countryi] + country$after_n[countryi]*0.1))
+  #d$Pc = 1 - (d$c_before_prob / d$c_after_prob)
+  #d$Pc[d$Pc < 0] = 0
 
 
-  pr = calculate_gtd_pr(g$d[d$stop_threshold & g$d$hourdiff >= 0,])
-  message(sprintf('Matches:\nPrecision: %s\nRecall:  %s\nF1:    %s', pr$Pm, pr$Rm, pr$F1m))
-  message(sprintf('\n\nArticles:\nPrecision: %s\nRecall:  %s\nF1:    %s', pr$Pa, pr$Ra, pr$F1a))
 
-  d$stop_threshold
+  ## pr event
+  event_pr = calc_PR(n_before = m$before_n[mi],
+               n_after = m$after_n[mi],
+               m_before = d$before,
+               m_after = d$after)
+
+  #d$e_before_prob = ((d$before + 0.1) / (m$before_n[mi] + m$before_n[mi]*0.1))
+  #d$e_after_prob = ((d$after + 0.1) / (m$after_n[mi] + m$after_n[mi]*0.1))
+  #d$e_odds = d$e_after_prob / d$e_before_prob
+  #d$Pe = 1 - (d$e_before_prob / d$e_after_prob)
+  #d$Pe[d$Pe < 0] = 0
+
+  #d$chi = calc_chi2(d$before,
+  #                  d$after,
+  #                  m$before_n[mi] - d$before,
+  #                  m$after_n[mi] - d$after)
+  #d$chi = ifelse(d$e_after_prob < d$e_before_prob, 0, d$chi)
+  #d$chi_p = pchisq(d$chi, df=1)
+
+
+  #d$Pe = 1 - (e_before_prob / e_after_prob)
+  #d$Pe[d$Pe < 0] = 0
+  #e_fp_after = e_false_rate_before * d$after
+  #e_TP = d$after - e_fp_after
+  #d$Pe = e_TP / d$after
+  #prob_after = ((d$after + 0.5) / (m$after_n[mi] + m$after_n[mi]*0.5))
+  #d$odds = prob_after / prob_before
+  #d$prob = d$odds / (1 + d$odds)
+
+
+  d = cbind(from=d$from, to=d$to, weight=d$weight, country=d$country, i = d$orig_i,
+            t=total_pr, c=country_pr, e=event_pr)
+
+
+  ## carry highest odds over to higher weights
+  data.table::setorderv(d, cols = c('weight'))
+
+  d[is.na(d)] = 0
+
+  d[, t_F1s := cummax(t.F1)]
+  d[, c_F1s := cummax(c.F1), by='country']
+  d[, e_F1s := cummax(e.F1), by='from']
+
+  is_max <- function(x) x == max(x, na.rm=T)
+  d[, t_select := is_max(t_F1s)]
+  d[, c_select := is_max(c_F1s), by='country']
+  d[, e_select := is_max(e_F1s), by='from']
+
+
+  data.table::setorderv(d, cols = c('i'))
+  return(d)
+}
+
+#' Vectorized computation of chi^2 statistic for a 2x2 crosstab containing the values
+#' [a, b]
+#' [c, d]
+#'
+#' @param a topleft value of the table
+#' @param b topright value
+#' @param c bottomleft value
+#' @param d bottomright value
+#' @param correct if TRUE, use yates correction. Can be a vector of length a (i.e. the number of tables)
+calc_chi2 <- function(a,b,c,d, correct=T){
+  n = a+b+c+d
+  sums = cbind(c1 = a+c, c2 = b+d, r1 = a+b, r2 = c+d)
+  yates_correction = if (correct) rep(T, nrow(sums)) else rep(F, nrow(sums))
+
+  x = as.numeric(a)*as.numeric(d) - as.numeric(b)*as.numeric(c) ## as.numeric to prevent integer overflow
+  x = ifelse(yates_correction, abs(x) - n/2, x)
+  chi = n*x^2 / (as.numeric(sums[,'c1']) * as.numeric(sums[,'c2']) * as.numeric(sums[,'r1']) * as.numeric(sums[,'r2']))
+  chi = ifelse(is.na(chi), 0, chi)
+  chi[chi == Inf] = 0
+  chi
+}
+
+
+calc_PR <- function(n_before, n_after, m_before, m_after) {
+  false_rate = m_before / n_before
+  fp_after = false_rate * n_after
+  TP = m_after - fp_after
+  TP[TP < 0] = 0
+  P = TP / m_after
+  R = TP / max(TP, na.rm = T)
+  F1 = (2 * P * R) / (P + R)
+  data.table::data.table(P=P, R=R, F1=F1)
 }

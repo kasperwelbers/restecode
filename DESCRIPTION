@@ -13,6 +13,10 @@ Description: This package contains text analysis tools developed for the
 Imports:
     methods,
     quanteda,
+    geosphere,
+    RANN,
+    rworldmap,
+    ggplot2,
     stringi,
     newsmap,
     Matrix,

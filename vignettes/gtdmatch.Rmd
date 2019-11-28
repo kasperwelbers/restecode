@@ -59,12 +59,14 @@ The full data on the [GTD website](https://www.start.umd.edu/gtd/contact/) is pr
 ```{r, eval=F}
 library(openxlsx)
 gtd = read.xlsx(xlsxFile = '[path to GTD file]')
+gtd = read.xlsx(xlsxFile = '~/Downloads/globalterrorismdb_0718dist.xlsx')
+
 ```
 
-The data can now be preprocessed into a Document Term Matrix (DTM). Here we use the `dfm` (document feature matrix) format from the `quanteda` package. The function `prepare_gtd` is provided in this package to take all the necessary steps. Here we prepare the data, using the fromdate argument to only include events after 2000-01-01.
+The data can now be preprocessed into a Document Term Matrix (DTM). Here we use the `dfm` (document feature matrix) format from the `quanteda` package. The function `prepare_gtd` is provided in this package to take all the necessary steps. Here we prepare the data, using the fromdate argument to only include events after 2006-01-01.
 
 ```{r, eval=F}
-gtd = prepare_gtd(gtd, fromdate = '2000-01-01', todate='2015-12-31')
+gtd = prepare_gtd(gtd, fromdate = '2006-01-01', todate='2015-12-31')
 ```
 
 ```{r, eval=F, echo=F}
@@ -88,7 +90,7 @@ The following code downloads about 500k articles, which might take around a day 
 
 ```{r, eval=F}
 gua = download_guardian(terrorism_terms, api.key, 
-                        fromdate = '2000-01-01', todate='2015-12-31', 
+                        fromdate = '2006-01-01', todate='2015-12-31', 
                         path = 'GTD_matching')
 
 ## Here we only use the articles from publication "The Guardian" (+/- 160,000)
@@ -139,7 +141,7 @@ We therefore first use a technique for clustering words with similar spelling to
 
 ```{r, eval=F}
 voc = union(colnames(gtd), colnames(gua))  
-simmat = term_char_sim(voc)                
+simmat = term_char_sim(voc, type = 'tri', min_overlap=2/3)
 ```
 
 The result is an adjacency matrix of the words in the vocabulary, which is 1 if words are sufficiently similar to be merged. We can now use this matrix to cluster all similar terms together, for which we provide the `term_union` function. Note that words are also clustered together if they are related indirectly. That is, if A and B are related, and B and C are related, Then a cluster ABC is created even if A is not related to C.   
@@ -191,6 +193,11 @@ sf = create_queries(gtd, gua, max_docprob = 0.01, min_obs_exp = 1.2,
                     min_docfreq = 1, use_dtm_and_ref = F, verbose=T, weight = 'tfidf')
 ```
 
+```{r, echo=F, eval=F}
+## release memory
+rm(gua); rm(gtd); gc()
+```
+
 The output of `create_queries` is a list with the revamped gtd and gua DTMs, now called `query_dtm` and `ref_dtm` (reference). The query dtm is in this case the gtd data. Both DTMs contain the same columns. For the `query_dtm` the values are weighted using a tfidf weighting scheme (as specified in `create_queries`) and normalized so that the max value is 1. For calculating the idf only the document frequency scores of the reference dtm (i.e. news articles) are used, because we do not want to weigh down common terrorism query terms in the GTD. The values in the `ref_dtm` are binary: does the term or term-combination occur in a document?
 
 The reason for this way of formatting the data is that we can now sum up the weights of the query terms (GTD) that occur in documents in the reference DTM (Guardian). In the `compare_documents` function that we use below for calculating the similarity scores for GTD and Guardian documents, we provide the `query_lookup` measure. This is an assymetric similarity score that is not normalized by the total sum of query terms or the sum of terms in the reference documents. This is important, because we are only interested in whether at least a minimum amount of weighted query terms occur.  
@@ -207,19 +214,108 @@ The first two arguments are the two DTMs that are to be compared, in our case th
 
 ```{r, eval=F}
 g = compare_documents(sf$query_dtm, sf$ref_dtm, 
-                      date_var='date', hour_window = c(-14*24,7*24), 
+                      date_var='date', hour_window = c(-90*24,7*24), 
                       min_similarity=1, measure = 'query_lookup', verbose=T)
 ```
 
 ```{r, eval=F, echo=F}
+x = hist(g$d$hourdiff[g$d$weight > 5])
+
+x = table(floor(g$d$hourdiff[g$d$weight > 5]))
+plot(names(x), x, type='l')
+
+x = table(floor(g$d$hourdiff[g$d$weight > 4]/25))
+plot(as.numeric(names(x)), as.numeric(x), type='l')
+
+
+
+estimate_validity(g, c(0,100), 30, weight_col = 'weight')
+
+x = table(floor(g$d$hourdiff[g$d$weight > 6.9]/96))
+plot(names(x), x, type='l')
+
+x = table(floor(g$d$hourdiff[g$d$weight > 6.9]/24))
+plot(names(x), x, type='l')
+
+
+
 ## we need UK to have higher weights... :(
-g$d[g$d$from == 200507070002,]
+#browse_gtd(200507070002)        ## this is one of the four london bombings 
+g$d[g$d$from == 200507070001,]  ## it has rather weak similarity scores to news
+g$from_meta[g$from_meta$document_id == 200507070002]
+
+g$d[g$d$to == 'technology/2005/jul/14/attackonlondon.terrorism',]  ## it has rather weak similarity scores to news
+
+
+estimate_validity(g, c(0,100), 30, weight_col = 'weight')
+res = gtd_pr(g, c(0,100), 50, weight_col = 'weight')
+
+
+## temp test: moving weight returns intermediate d
+mw = moving_weight(g)
+
+mw[mw$from == 200507070002,]  ## it has rather weak similarity scores to news
+
+mean(mw$e_select)
+
+x = g$d$Pc
+
+
+
+g$d$P = mw$P
+g$d$Pe = mw$Pe
+g$d$Pc = mw$Pc
+
+cor(g$d[,c('P','Pe','Pc')])
+
+g$d$test = g$d$Pe * sqrt(g$d$weight)
+g$d$test = g$d$weight^0.5
+g$d$test = g$d$Pe * g$d$P
+interpol <- function(p1, p2, lambda) (lambda*p1) + ((1-lambda)*p2)
+g$d$test = interpol(g$d$Pe, g$d$P, 0.3)
+
+g$d$test = ifelse(g$d$P > g$d$Pc, g$d$P, g$d$Pc)
+g$d$test = ifelse(g$d$P > g$d$Pc, g$d$P, g$d$Pc)
+
+g$d
+g$d[g$d$country == 'United Kingdom',]
+
+
+res = gtd_pr(g, c(min(g$d$test), max(g$d$test)), 50, weight_col = 'test')
+max(res$F1m, na.rm=T)
+g$d$test[g$d$from == 200507070002 & g$d$to == 'technology/2005/jul/14/attackonlondon.terrorism'] / res$weight[which.max(res$F1m)]
+
+head(g$d[g$d$from == 200507070002,])  
+
+
+estimate_validity(g, c(0,1), 30, weight_col = 'weight2')
+
+browse_guardian('technology/2005/jul/07/media.newmedia')
+
+g$to_meta[g$to_meta$date == '2005-07-07',]
+g$to_meta[g$to_meta$date == '2005-07-08',]
+
+
+
+uk_ids = g$from_meta$document_id[g$from_meta$country == 'United Kingdom']
+mean(g$d$weight[g$d$from %in% uk_ids])
+mean(g$d$weight[!g$d$from %in% uk_ids])
 
 ## especially this match
 dt = get_doc_terms(sf$query_dtm, '200507070002')
 x = get_overlap_terms(sf$query_dtm, doc.x='200507070002', doc.y = 'technology/2005/jul/14/society.internet', sf$ref_dtm)
 dt[names(dt) %in% x]
 sum(dt[names(dt) %in% x])
+
+
+
+
+## experiment
+ds = moving_weight(g)
+
+
+
+
 ```
 
 The resuls of the comparison are not copyright sensitive, so they are provided as data in the package. Here we load these results (overwriting g) so that they can be used for the remainder of the vignette.
@@ -256,7 +352,7 @@ To get a first indication of the validity of the matches, we can look at the his
 ```{r, fig.width = 6, fig.height = 3, fig.align="center"}
 par(mfrow=c(1,3))  ## plot side by side
 for (thres in c(5,10,20)) 
-  x = hist(g$d$hourdiff[g$d$weight > thres], right = F, main='', xlab='hour difference')
+  x = hist(g$d$hourdiff[g$d$weight > thres], right = F, main='', xlab='hour difference', breaks = 50)
 ```
 
 In all three cases we see a peak after the an hour difference of zero, which indicates that the algorithm picks up true positives. However, we also see that there are false positive, especially for the lowest threshold. This is a good sign, because it means that we get a better precision if we increase the threshold. If we increase the threshold to a point where there are only a few matches before the zero hour difference point, we can be confident that we have a high precision.
@@ -291,7 +387,7 @@ $$\hat{F1} = \frac{\hat{P} \times \hat{R}}{\hat{P} + \hat{R}}$$
 The following function estimates the precision, recall and F1 scores for a range of similarity thresholds. 
 
 ```{r, fig.width = 6, fig.height = 3}
-res = estimate_validity(g)
+res = estimate_validity(g, weight_range = c(1,30), steps=30)
 ```
 
 As an initial validation, this methods shows that the matching algorithm is able to identify correct matches, and confirms that by increasing the threshold the precision increases. Note that the exact values cannot be interpreted as the true precision and recall of the matching task (our manual validation indicates that these these are much higher). Nevertheless, they provide a way to compare different settings, such as the weight threshold, for finding good results.
@@ -301,13 +397,17 @@ As an initial validation, this methods shows that the matching algorithm is able
 
 ## we can bootstrap the hell out of this thing
 ## @kasper: implementing the alternative calculation of estimate_validity will enable bootstrapping many samples
-res = estimate_validity(g, n_sample = 20000)
+res = estimate_validity(g, n_sample = 10000)
 
 ## test this for London? Should threshold be lower?
 res = estimate_validity(g, from_sample = g$from_meta$country == "United Kingdom")
 res = estimate_validity(g, from_sample = g$from_meta$country == "United States")
-res = estimate_validity(g, from_sample = g$from_meta$country == "United States")
+res = estimate_validity(g, from_sample = g$from_meta$country == "Afghanistan")
 #### hard to tell... seems mostly an issue of low
+
+
+
+
 ```
 
 
@@ -322,7 +422,7 @@ In total, we found that 26 out of the 500 articles matched with a GTD event. Sin
 The `pr_plot` function uses this data to calculate the precision, recall and F1 (weighted average of precision and recall) scores. The data frame `g` is subsetted so that it only includes matches of GTD events to news articles within 7 days after the event, and only includes news articles that are in the gold standard (N = 500). The precision, recall and F1 scores are calculated separately for the article level (does the article have at least one GTD match) and match level (each individual match of an article to a GTD event). Furthermore, the scores are calculated for different weight thresholds.
 
 ```{r, fig.width = 7, fig.height = 4}
-pr = gtd_pr(g)
+pr = gtd_pr(g, weight_range = c(1,30), steps = 30)
 ```
 
 The results are promising. For both the article level and match level the recall remains very high up to a threshold around eleven, at which point precision has sufficiently climbed up. For the match level the highest F1 score is found at a weight threshold of eleven. For the article level the highest F1 score is sixteen due to a steeper increase of precision, but the F1 score is almost as high at threshold eleven, and here the recall is notably better. 
@@ -366,7 +466,8 @@ g$d$geomatch = match_geo(g)
 The `geomatch` column that has nog been added is a logical vector. We can now what the precision and recall look like if we filter on matches where geomatch is TRUE. 
 
 ```{r, fig.width = 7, fig.height = 4}
-pr_geomatch = gtd_pr(g, filter=g$d$geomatch)
+pr_geomatch = gtd_pr(g, weight_range = c(1,30), steps = 30, 
+                     filter=g$d$geomatch)
 ```
 
 Eyeballing the plotted results shows that the precision increases and recall slightly decreases. We can look at this more specifically by comparing the `pr` and `pr_geomatch`. The `compare_pr` function 
@@ -402,14 +503,9 @@ Aggregate edges to count how many news articles were matched per event.
 (I will probably make functions for extracting the data to make it easier to see what I'm doing, but for now I'll put all the code here)
 
 ```{r}
-library(data.table)
-meta = subset(g$from_meta, .complete_window)
-e = subset(g$d, weight >= 11 & geomatch)
-e = e[, list(N_news=length(weight), has_news=T), by='from']
+e = get_event_coverage(g, 11, use_geomatch=T)
+e
 
-e = merge(meta, e, by.x='document_id', by.y='from', all=T)
-e$N_news[is.na(e$N_news)] = 0
-e$has_news[is.na(e$has_news)] = 0
 ```
 
 Lets start with the percentage of GTD events per country that received coverage

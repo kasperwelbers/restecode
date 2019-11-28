@@ -12,6 +12,7 @@ udpipe_models/*
 
 # downloaded data
 GTD_matching/*
+Suspect_communities/*
 
 # do not (yet) upload the paper
 paper/*

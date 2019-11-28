@@ -1,0 +1,241 @@
+---
+title: "Suspect Communities"
+author: "by Kasper Welbers, Wouter van Atteveldt, and everyone who wants on it from the ResTeCo team"
+output:
+  pdf_document:
+editor_options: 
+  chunk_output_type: console
+---
+  
+```{r, include=FALSE}
+options(digits=3)
+library(knitr)
+library(kableExtra)
+```
+
+
+```{r, eval=F}
+dir.create('Suspect_communities')
+```
+
+# Downloading and preprocessing the data
+
+## The Guardian data
+
+The Guardian has an API that provides free access to full texts. To access this API you first need to [register for an API key](https://bonobo.capi.gutools.co.uk/register/developer).
+
+```{r}
+api.key = "[paste your own api key here]"
+api.key = 'eb739546-9621-4af7-aa97-fd90f406ad27'
+```
+
+We can access the API through the `GuardianR` package. For convenience we have made a wrapper function that downloads the data in batches to a given folder, and then creates the DTM when finished. This prevents having to download the data twice, which can take quite a while. The function can also be interupted. As long as the same query and from/to date are used, it will resume from the last downloaded batch. 
+
+The `download_guardian` function requires a query, or a character vector of query terms. For this analysis we look for articles that mention both terrorism and islam. 
+
+The following code downloads about 3310 articles. 
+
+```{r, eval=F}
+gua = download_guardian('(terrorist OR terrorists OR terrorism) AND (islam OR islamic OR muslim OR muslims)', api.key, 
+                        fromdate = '2000-01-01', todate='2019-09-30', 
+                        path = 'Suspect_communities')
+```
+
+
+```{r, eval=F}
+#library(cleanNLP)
+#cnlp_download_corenlp('en')
+#cnlp_init_corenlp('en', anno_level = 3)
+```
+
+```{r}
+dir.create('Suspect_communities/spacy_tokens')
+
+gua = subset(gua, ! id %in% ad_hoc_remove)
+gua$tid = sapply(as.character(gua$id), digest::digest, algo='xxhash32')
+meta = data.table::data.table(id = gua$id,
+                              tid = gua$tid,
+                              section = gua$sectionName,
+                              date = as.POSIXct(gua$webPublicationDate),
+                              url = gua$url)
+
+saveRDS(meta, file='Suspect_communities/spacy_tokens/meta.rds')
+
+library(spacyr)
+#spacy_install(version = '2.0.12')
+#spacy_download_neuralcoref('en_coref_lg')
+#spacy_finalize()  ## only for testing (switching between md and lg model)
+spacy_initialize('en_coref_lg')
+
+gua$fname = sprintf('Suspect_communities/spacy_tokens/%s.rds', meta$tid)
+gua$done = gua$fname %in% list.files('Suspect_communities/spacy_tokens', full.names = T)
+gua = gua[order(!gua$done),]
+start_at = which(!gua$done)[1]
+
+cat(sprintf('\n%s / %s\n', start_at, nrow(meta)))
+for (i in start_at:nrow(gua)) {
+  if ((i %% 10) == 0) cat(sprintf('%s / %s\n', i, nrow(gua)))
+  text = paste(gua$headline[i], gua$body[i], sep='. ')  ## consider headline as part of lead paragraph
+  text = gsub('<p>', '\n\n', text)
+  text = gsub('<[^>]*>', '', text)
+  text = suspect_comm_paragraphs(text)
+  if (text == '') {
+    tokens = data.table::data.table()
+  } else {
+    tokens = spacy_parse(text, dependency=T, coref=T)
+    tokens$doc_id = as.character(gua$id[i])
+  }
+  saveRDS(tokens, file=gua$fname[i])
+}
+
+```
+
+
+```{r}
+library(rsyntax)
+f = list.files('Suspect_communities/spacy_tokens', full.names = T)
+f = f[!grepl('meta', f)]
+tokens = lapply(f, readRDS)
+tokens = data.table::rbindlist(tokens, use.names = T, fill = T)
+tokens = as_tokenindex(tokens, sentence = 'sentence_id', parent = 'head_token_id', relation = 'dep_rel')
+saveRDS(tokens, file='Suspect_communities/backup.rds')
+```
+
+
+```{r}
+
+
+library(rsyntax)
+library(magrittr)
+library(data.table)
+tokens = readRDS('~/Dropbox/restecode/Suspect_communities/backup.rds')
+tokens = as_tokenindex(tokens)
+
+islam = unique(tokens[grep('islam|muslim', tokens$token, ignore.case = T),c('doc_id','sentence')])
+terror = unique(tokens[grep('terror', tokens$token, ignore.case = T),c('doc_id','sentence')])
+both = islam[terror, on=c('doc_id','sentence')]
+
+## add coref to token
+has_coref = !is.na(tokens$coref_text)
+copy_coref = has_coref & is.na(c(tokens$coref_text[-1], NA)) ## for multi token names
+tokens$token = ifelse(!copy_coref, tokens$token, sprintf('%s [%s]', tokens$token, gsub(' ','_', tokens$coref_text)))
+
+#tokens = tokens[both, on=c('doc_id','sentence') ,]
+#View(tokens['politics/2003/nov/22/religion.september11', on=c('doc_id')])
+
+tokens = tokens %>%
+  spacy_quotes() %>%
+  spacy_links() %>%
+  spacy_actions()
+
+
+
+action_ids = unique(tokens$action_id[tokens$action == 'subject' & grepl('islam|muslim', tokens$token, ignore.case = T)])
+actions = tokens[as.character(action_ids), on=c('action_id')]
+actions = data.table::dcast(actions, action_id ~ action, value.var='token', fun.aggregate = paste, collapse=' ')
+actions[1,]
+
+actions
+
+tokens %>%
+  spacy_quotes() %>%
+  syntax_reader('quote', 'source', random_seed = 2)
+
+  
+
+tokens = readRDS('Suspect_communities/backup.rds')
+tokens = as_tokenindex(tokens)
+
+tokens = tokens %>%
+  corenlp_quotes() %>%
+  corenlp_clauses()
+
+tokens %>% plot_tree(token, upos, rname, annotation='clause', sentence_i = 3)
+tokens %>% plot_tree(token, upos, rname, annotation='clause', sentence_i = 4)
+tokens %>% plot_tree(token, upos, rname, annotation='clause', sentence_i = 5)
+
+tokens2 = corenlp_simplify(tokens)
+
+
+tokens[list(doc_id='world/2000/dec/08/terrorism', sentence=11)] %>%
+  corenlp_simplify() %>%
+  resolve_siblings('nsubj') %>%
+  plot_tree(token, pdf_viewer = T)
+  
+
+tokens2
+
+tokens %>%
+  corenlp_simplify() %>%
+  plot_tree(token, POS, sentence_i = 7)
+  
+
+"Bob and Anna were eating and drinking" %>%
+  corenlp_tokenindex() %>%
+  split_conjunctions(parent_pos='VERB') %>%
+  plot_tree(token, upos)
+
+
+"Bob and Anna went hiking and fishing" %>%
+  corenlp_tokenindex() %>%
+  corenlp_simplify() %>%
+  plot_tree(token, upos)
+
+rsyntax::children
+
+
+corenlp_tokenindex("Anna tried to kill pretty Bob and Steve without remorse.") %>%
+  split_conjunctions() %>%
+  plot_tree(token)
+
+
+corenlp_tokenindex("Anna and Dave went hiking.") %>%
+  split_conjunctions() %>%
+  plot_tree(token)
+
+corenlp_tokenindex("The brave Anna and Dave went hiking.") %>%
+  split_conjunctions() %>%
+  plot_tree(token)
+
+corenlp_tokenindex("The brave Anna and the ever cowardly Dave went hiking.") %>%
+  split_conjunctions() %>%
+  plot_tree(token)
+
+corenlp_tokenindex("Anna and Dave went hiking and climbing alone.") %>%
+  split_conjunctions() %>%
+  plot_tree(token,POS)
+
+corenlp_tokenindex("It was and stays a stupid idea.") %>%
+  split_conjunctions() %>%
+  plot_tree(token)
+
+corenlp_tokenindex("It is stupid but it gets better.") %>%
+  split_conjunctions() %>%
+  plot_tree(token)
+
+corenlp_tokenindex("It is and stays stupid.") %>%
+  split_conjunctions() %>%
+  plot_tree(token)
+
+corenlp_tokenindex("It has a subject and verb, but can't stand alone as a sentence") %>%
+  split_conjunctions() %>%
+  plot_tree(token, POS)
+
+
+```
+
+
+```{r}
+## or use spacy
+devtools::install_github('kasperwelbers/spacyr')
+library(spacyr)
+spacy_install(version = '2.0.12')
+
+spacy_download_neuralcoref('en_coref_lg')
+spacy_initialize('en_coref_lg')
+
+tokens = spacy_parse("The second, more brutal phase of the war, triggered in 1999 by an incursion by Islamic Chechen rebels into Dagestan and by mysterious explosions in apartment blocks across Russia that killed over 300, saw Terek disbanded once more.",
+            dependency=T, coref=T)
+tokens %>%
+  plot_tree(token)
+```

@@ -4,7 +4,8 @@
 \alias{prepare_gtd}
 \title{Prepare the GTD data}
 \usage{
-prepare_gtd(d, fromdate = NULL, todate = NULL, with_geo = T)
+prepare_gtd(d, fromdate = NULL, todate = NULL, with_geo = T,
+  rm_time = T)
 }
 \arguments{
 \item{d}{A data.frame with the GTD data. You can download the GTD data for free
@@ -14,6 +15,10 @@ You can read the .xlsx file with \code{\link[openxlsx]{read.xlsx}}.}
 \item{fromdate}{A Date (or character value that can be coerced to Date)}
 
 \item{todate}{A Date (or character value that can be coerced to Date)}
+
+\item{with_geo}{IF TRUE, add geo tags to docvars (see vignette for usage)}
+
+\item{rm_time}{If TRUE, remove time related terms, such as monday, januari and yesterday.}
 }
 \value{
 A quanteda style DTM

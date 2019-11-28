@@ -4,15 +4,21 @@
 \alias{estimate_validity}
 \title{Estimate weight threshold by estimating precision and recall}
 \usage{
-estimate_validity(g, min_weight = NA, do_plot = T,
-  from_sample = NULL, n_sample = NA)
+estimate_validity(g, weight_range, steps, min_weight = NA, do_plot = T,
+  from_sample = NULL, weight_col = "weight", n_sample = NA)
 }
 \arguments{
 \item{g}{The edgelist output of newsflow.compare (use the argument: return_as = "edgelist").}
 
+\item{weight_range}{A vector of length 2, with the min and max weight threshold}
+
+\item{steps}{The number of observations for which to calculate the weight threshold}
+
 \item{min_weight}{Optionally, set a minimum weight only for this calculation}
 
 \item{do_plot}{IF set to FALSE, do not plot results (results are also returned as a data.frame)}
+
+\item{weight_col}{the name of the column with the weight scores}
 
 \item{n_sample}{Draw a random sample of events. Overrides from_subset}
 

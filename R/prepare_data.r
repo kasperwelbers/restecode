@@ -6,12 +6,14 @@
 #' @param text_cols     The name(s) of the column(s) with article text. e.g. c('headline','byline','body')
 #' @param docvars       The columns to include as docvars (article meta such as headline, url)
 #' @param first_n_words Optionally, only include the first n words of the article text in the DTM
+#' @param with_geo      IF TRUE, add geo tags to docvars (see vignette for usage)
+#' @param rm_time       If TRUE, remove time related terms, such as monday, januari and yesterday.
 #'
 #' @return A quanteda style DTM
 #' @export
 #'
 #' @examples
-prepare_news <- function(d, doc_col, date_col, text_cols, docvars=NULL, first_n_words=NA, with_geo=T) {
+prepare_news <- function(d, doc_col, date_col, text_cols, docvars=NULL, first_n_words=NA, with_geo=T, rm_time=T) {
   message('Preparing texts')
   texts=list()
   for (col in text_cols) {
@@ -30,7 +32,7 @@ prepare_news <- function(d, doc_col, date_col, text_cols, docvars=NULL, first_n_
   ds$date = as.POSIXct(d[[date_col]])
 
   message('Creating DTM')
-  prepare_dtm(ds, doc_col=doc_col, first_n_words=NA)
+  prepare_dtm(ds, doc_col=doc_col, first_n_words=NA, rm_time=rm_time)
 }
 
 
@@ -150,15 +152,24 @@ download_guardian <- function(query_terms, api.key, fromdate, todate, path=getwd
     if (needs_download && verbose && length(date_steps) > 1) pb$up(i)
   }
 
+  clean_text <- function(x) {
+    x = gsub('<p>', '\n\n', x)
+    x = gsub('<[^>]*>', '', x)
+    x = gsub('\u0095', '', x)
+    x = iconv(x, "", "cp1252", sub=' ')
+    x = gsub('\xe2\x80', '”', x)
+    iconv(x, "", "UTF8", sub = ' ')
+  }
+
   files = list.files(path, full.names = T)
   files = files[!grepl('readme\\.txt$', files)]
   files = lapply(files, readRDS)
   d = data.table::rbindlist(files, fill = T)
   data.table::setnames(d, old='webUrl', new='url')
-  d$headline = as.character(d$headline)
-  d$byline = as.character(d$byline)
-  d$body = as.character(d$body)
-  d$trailText = as.character(d$trailText)
+  d$headline = clean_text(as.character(d$headline))
+  d$byline = clean_text(as.character(d$byline))
+  d$body = clean_text(as.character(d$body))
+  d$trailText = clean_text(as.character(d$trailText))
   d
 }
 
@@ -175,6 +186,8 @@ download_guardian <- function(query_terms, api.key, fromdate, todate, path=getwd
 #'                  You can read the .xlsx file with \code{\link[openxlsx]{read.xlsx}}.
 #' @param fromdate  A Date (or character value that can be coerced to Date)
 #' @param todate    A Date (or character value that can be coerced to Date)
+#' @param with_geo      IF TRUE, add geo tags to docvars (see vignette for usage)
+#' @param rm_time       If TRUE, remove time related terms, such as monday, januari and yesterday.
 #'
 #' @return A quanteda style DTM
 #' @export
@@ -184,7 +197,7 @@ download_guardian <- function(query_terms, api.key, fromdate, todate, path=getwd
 #' gtd_data = openxlsx::read.xlsx('GTD FILE AS DOWNLOADED FROM GTD WEBSITE')
 #' gtd_dtm = prepare_gtd(gtd_data, fromdate='2010-01-01')
 #' }
-prepare_gtd <- function(d, fromdate=NULL, todate=NULL, with_geo=T) {
+prepare_gtd <- function(d, fromdate=NULL, todate=NULL, with_geo=T, rm_time=T) {
   d$imonth[d$imonth == 0] = 1
   d$iday[d$iday == 0] = 1
   d$date = strptime(paste(d$iyear, d$imonth, d$iday), '%Y %m %d')
@@ -227,7 +240,7 @@ prepare_gtd <- function(d, fromdate=NULL, todate=NULL, with_geo=T) {
                  wounded = d$nwound,
                  stringsAsFactors = F)
   d = d[!is.na(d$id),]
-  prepare_dtm(d)
+  prepare_dtm(d, doc_col='id', text_col = 'text', rm_time=rm_time)
 }
 
 first_n_words <- function(txt, n, batchsize=50000) {
@@ -242,12 +255,12 @@ first_n_words <- function(txt, n, batchsize=50000) {
   txt
 }
 
-prepare_dtm <- function(d, doc_col='id', text_col='text', first_n_words=NA) {
+prepare_dtm <- function(d, doc_col='id', text_col='text', first_n_words=NA, rm_time=T) {
   if (!is.na(first_n_words)) {
     d[[text_col]] = first_n_words(d[[text_col]], 200)
   }
   ## we use text as the text field. Summary is added as meta info for inspecting results later on
-  corp = quanteda::corpus(d, docid_field = 'id', text_field = 'text')
+  corp = quanteda::corpus(d, docid_field = doc_col, text_field = 'text')
   dtm = quanteda::dfm(corp, stem=T, remove=quanteda::stopwords(), tolower=T,  remove_punct=T)
 
   ## filter out whitespace and NA
@@ -256,6 +269,14 @@ prepare_dtm <- function(d, doc_col='id', text_col='text', first_n_words=NA) {
 
   ## filter out terms without alpha and remove stopwords
   dtm = quanteda::dfm_keep(dtm, '[a-zA-Z]', valuetype='regex')
+
+  if (rm_time) {
+    tday = grepl('monday|tuesday|wednesday|thursday|friday|saturday|sunday', colnames(dtm), ignore.case = T)
+    tmonth = grepl("januari|februari|march|april|may|june|juli|august|septemb|octob|novemb|decemb", colnames(dtm), ignore.case = T)
+    tmisc = grepl('yesterd}|week|day|month|recent|year|today', colnames(dtm), ignore.case = T)
+    dropcol = colnames(dtm)[tday | tmonth | tday]
+    dtm = quanteda::dfm_remove(dtm, pattern=dropcol)
+  }
 
   #colnames(dtm) = stringi::stri_trans_general(colnames(dtm), "any-latin")
   #colnames(dtm) = stringi::stri_trans_general(colnames(dtm), "latin-ascii")
