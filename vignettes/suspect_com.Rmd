@@ -26,7 +26,6 @@ The Guardian has an API that provides free access to full texts. To access this 
 
 ```{r}
 api.key = "[paste your own api key here]"
-api.key = 'eb739546-9621-4af7-aa97-fd90f406ad27'
 ```
 
 We can access the API through the `GuardianR` package. For convenience we have made a wrapper function that downloads the data in batches to a given folder, and then creates the DTM when finished. This prevents having to download the data twice, which can take quite a while. The function can also be interupted. As long as the same query and from/to date are used, it will resume from the last downloaded batch. 
